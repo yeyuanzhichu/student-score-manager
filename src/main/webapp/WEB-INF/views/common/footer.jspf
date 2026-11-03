@@ -1,0 +1,10 @@
+<%@ page pageEncoding="UTF-8" %>
+    </div><!-- /.content -->
+    <footer class="app-footer">
+      班级学生成绩管理系统 · Java EE 课程设计 &copy; 2026 · 教师录入 / 学生查询 / 平均分 / 及格率
+    </footer>
+  </main>
+</div>
+<script src="${ctx}/assets/js/app.js"></script>
+</body>
+</html>

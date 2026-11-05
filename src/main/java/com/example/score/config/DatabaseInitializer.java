@@ -46,8 +46,15 @@ public final class DatabaseInitializer {
     private DatabaseInitializer() {
     }
 
+    /**
+     * 应用启动时调用：
+     * 1）执行 schema.sql 建表（IF NOT EXISTS，可重复执行）；
+     * 2）如果 students 表为空，说明是第一次启动，生成演示数据；
+     * 3）已有数据就跳过，不会覆盖用户录入的成绩。
+     */
     public static synchronized void initialize() {
         try (Connection connection = Database.getConnection()) {
+            // 从 classpath 读取建表脚本并执行
             try (Reader schema = new InputStreamReader(
                     DatabaseInitializer.class.getResourceAsStream("/db/schema.sql"),
                     StandardCharsets.UTF_8)) {
@@ -57,6 +64,7 @@ public final class DatabaseInitializer {
                 RunScript.execute(connection, schema);
             }
 
+            // 只有空库才灌演示数据；事务保证要么全成功、要么全失败
             if (isEmpty(connection)) {
                 connection.setAutoCommit(false);
                 try {

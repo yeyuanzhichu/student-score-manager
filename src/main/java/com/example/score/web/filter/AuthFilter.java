@@ -16,8 +16,19 @@ import jakarta.servlet.http.HttpSession;
 import java.io.IOException;
 import java.util.Set;
 
+/**
+ * 登录与权限过滤器，拦截所有请求。
+ *
+ * <p>规则：</p>
+ * <ul>
+ *   <li>登录页、退出、静态资源（/assets/）直接放行；</li>
+ *   <li>没登录访问业务页面 → 重定向到 /login，并记住原地址，登录后跳回去；</li>
+ *   <li>学生访问 /teacher/* → 拦回学生端；教师访问 /student/* → 拦回教师端。</li>
+ * </ul>
+ */
 @WebFilter(filterName = "authFilter", urlPatterns = "/*")
 public class AuthFilter implements Filter {
+    /** 不需要登录就能访问的路径 */
     private static final Set<String> PUBLIC_PATHS = Set.of("/login", "/logout", "/favicon.ico");
 
     @Override
@@ -36,6 +47,7 @@ public class AuthFilter implements Filter {
         HttpSession session = request.getSession(false);
         AuthUser user = session == null ? null : (AuthUser) session.getAttribute("currentUser");
         if (user == null) {
+            // 没登录：记下原本要访问的地址，登录成功后跳回去
             String target = request.getQueryString() == null
                     ? path
                     : path + "?" + request.getQueryString();
@@ -47,6 +59,7 @@ public class AuthFilter implements Filter {
             return;
         }
 
+        // 已登录：再做一次角色检查，防止学生手动输入教师后台地址
         if (path.startsWith("/teacher/") && !user.isTeacher()) {
             Flash.error(request, "你没有访问教师后台的权限");
             response.sendRedirect(contextPath + "/student/dashboard");

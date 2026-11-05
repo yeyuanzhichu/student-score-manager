@@ -11,7 +11,17 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 学生数据访问层（DAO）。
+ *
+ * <p>前半部分是学生增删改查；后半部分用一段汇总 SQL 直接算出
+ * 每个学生的成绩数、平均分、及格率、已获学分 / 总学分，供报表和学生成绩页使用。</p>
+ */
 public class StudentDao {
+    /**
+     * 汇总查询的 SELECT 部分（每个学生一行）。
+     * COUNT/AVG/SUM 都是数据库直接算，比在 Java 里循环快，也更简洁。
+     */
     private static final String SUMMARY_COLUMNS =
             "s.id AS student_id, s.student_no, s.name, s.gender, s.class_id, c.class_name, "
                     + "COUNT(sc.id) AS score_count, "

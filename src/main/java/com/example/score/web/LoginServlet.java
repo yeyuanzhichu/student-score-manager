@@ -12,6 +12,13 @@ import jakarta.servlet.http.HttpSession;
 
 import java.io.IOException;
 
+/**
+ * 登录控制器，对应 /login。
+ *
+ * <p>GET：显示登录页；如果已经登录则直接跳到对应首页。</p>
+ * <p>POST：调用 AuthService 校验账号密码，成功后把 AuthUser 放进 Session，
+ * 再按角色跳转到教师工作台或学生成绩页。</p>
+ */
 @WebServlet("/login")
 public class LoginServlet extends HttpServlet {
     private final AuthService authService = new AuthService();
@@ -57,11 +64,13 @@ public class LoginServlet extends HttpServlet {
             return;
         }
 
+        // 登录成功：创建 Session 并更换 Session ID（防止会话固定攻击）
         HttpSession session = request.getSession(true);
         request.changeSessionId();
         session.setAttribute("currentUser", user);
-        session.setMaxInactiveInterval(30 * 60);
+        session.setMaxInactiveInterval(30 * 60); // 30 分钟无操作自动退出
 
+        // 如果之前被过滤器记住过原地址，登录后跳回去
         String redirect = (String) session.getAttribute("loginRedirect");
         session.removeAttribute("loginRedirect");
         if (redirect != null && redirect.startsWith("/") && !redirect.startsWith("//")

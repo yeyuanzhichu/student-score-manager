@@ -30,10 +30,23 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 成绩管理业务层（Service）。
+ *
+ * <p>这一层负责“业务规则”，例如：
+ * 一次保存整班成绩、统计平均分/及格率、校验学号是否重复、删除课程前检查有没有成绩。
+ * 它自己不直接写 SQL，而是调用 DAO 层去读写数据库；Servlet 只负责接收请求和跳转页面。</p>
+ *
+ * <p>分层关系：JSP 页面 → Servlet 控制器 → GradeService 业务层 → DAO 数据访问层 → H2 数据库。</p>
+ */
 public class GradeService {
+    /** 班级数据访问对象 */
     private final ClassDao classDao = new ClassDao();
+    /** 学生数据访问对象 */
     private final StudentDao studentDao = new StudentDao();
+    /** 课程数据访问对象 */
     private final CourseDao courseDao = new CourseDao();
+    /** 成绩数据访问对象 */
     private final ScoreDao scoreDao = new ScoreDao();
 
     public List<ClassInfo> listClasses() {
@@ -56,6 +69,10 @@ public class GradeService {
         return courseDao.findById(id);
     }
 
+    /**
+     * 组装教师工作台的数据：总体统计、各班级统计、各课程统计、分数段分布、最近录入记录。
+     * 这里只是把多个 DAO 查询结果拼成一个 DashboardView，方便 JSP 一次性渲染。
+     */
     public DashboardView dashboard() {
         OverallStat overall = scoreDao.findOverall();
         overall.setStudentCount(studentDao.countAll());
@@ -67,6 +84,10 @@ public class GradeService {
         return new DashboardView(overall, classStats, courseStats, distribution, recent);
     }
 
+    /**
+     * 组装某个班级的统计报表。
+     * 如果传入的 classId 为空或不存在，就默认使用第一个班级，保证页面永远有数据可展示。
+     */
     public ReportView report(Integer classId) {
         List<ClassInfo> classes = classDao.findAll();
         if (classes.isEmpty()) {
@@ -89,6 +110,10 @@ public class GradeService {
         return new ReportView(classes, selected, classStat, courseStats, students, distribution);
     }
 
+    /**
+     * 学生端成绩单：个人汇总（平均分/及格率/学分/排名）+ 每门课的成绩、班级平均分、班级排名。
+     * 排名是把同班同学按平均分排序后，找到当前学生所在的位置。
+     */
     public StudentView studentView(int studentId) {
         StudentSummary summary = studentDao.findSummary(studentId);
         if (summary == null) {
@@ -108,6 +133,10 @@ public class GradeService {
         return scoreDao.findRoster(classId, courseId);
     }
 
+    /**
+     * 根据花名册计算录入进度、平均分和及格率。
+     * 注意：只统计“已录入”的成绩，空白（null）不算 0 分，也不参与平均分。
+     */
     public RosterStats rosterStats(List<RosterRow> rows) {
         int total = rows.size();
         int entered = 0;
@@ -128,7 +157,16 @@ public class GradeService {
     }
 
     /**
-     * 保存整班某门课的成绩。空白输入表示清除该生该课程成绩。
+     * 批量保存某班某门课的成绩。
+     *
+     * <p>流程：</p>
+     * <ol>
+     *   <li>检查班级、课程是否存在；</li>
+     *   <li>取出该班花名册，只允许保存花名册里的学生（防止伪造学生 ID）；</li>
+     *   <li>先把所有分数校验完（0～100），再统一写库，避免“存了一半失败”；</li>
+     *   <li>在一个数据库事务里逐条 upsert（有则更新、无则新增），空白则删除该成绩；</li>
+     *   <li>任何一条失败就 rollback，全部回滚。</li>
+     * </ol>
      */
     public ScoreSaveResult saveScores(int classId, int courseId, Map<Integer, String> rawScores,
                                       int teacherId) throws ValidationException {
@@ -141,11 +179,13 @@ public class GradeService {
             throw new ValidationException("请选择有效的课程");
         }
         List<RosterRow> roster = scoreDao.findRoster(classId, courseId);
+        // 以花名册为准：提交上来的学生 ID 必须属于这个班，否则忽略
         Map<Integer, String> rosterIds = new LinkedHashMap<>();
         for (RosterRow row : roster) {
             rosterIds.put(row.getStudentId(), row.getName());
         }
 
+        // 第一步：只做校验，不写数据库。全部通过后再统一保存
         Map<Integer, Double> values = new LinkedHashMap<>();
         for (Map.Entry<Integer, String> entry : rawScores.entrySet()) {
             if (!rosterIds.containsKey(entry.getKey())) {
@@ -170,6 +210,7 @@ public class GradeService {
 
         int saved = 0;
         int cleared = 0;
+        // 第二步：在一个事务里写入，任何一条失败就全部回滚
         try (Connection connection = Database.getConnection()) {
             connection.setAutoCommit(false);
             try {
@@ -195,6 +236,9 @@ public class GradeService {
         return new ScoreSaveResult(saved, cleared);
     }
 
+    /**
+     * 新增学生：先校验，再把明文密码用 BCrypt 哈希后保存（数据库里不存明文）。
+     */
     public int createStudent(Student student, String initialPassword) throws ValidationException {
         validateStudent(student, null);
         if (initialPassword == null || initialPassword.length() < 6) {
@@ -203,6 +247,9 @@ public class GradeService {
         return studentDao.insert(student, PasswordUtil.hash(initialPassword));
     }
 
+    /**
+     * 修改学生：newPassword 为空表示不重置密码，只有填了才更新密码哈希。
+     */
     public void updateStudent(Student student, String newPassword) throws ValidationException {
         validateStudent(student, student.getId());
         String hash = null;
@@ -222,6 +269,10 @@ public class GradeService {
         studentDao.delete(id);
     }
 
+    /**
+     * 学生表单的服务端校验：学号格式/唯一性、姓名、性别、班级、电话。
+     * 前端虽然也校验了，但服务端必须再校验一次，防止绕过页面直接提交非法数据。
+     */
     private void validateStudent(Student student, Integer excludeId) throws ValidationException {
         if (WebUtil.isBlank(student.getStudentNo())) {
             throw new ValidationException("学号不能为空");
@@ -257,6 +308,9 @@ public class GradeService {
         return 0;
     }
 
+    /**
+     * 删除课程前先检查有没有成绩记录，有成绩就不允许删，避免误删历史数据。
+     */
     public void deleteCourse(int id) throws ValidationException {
         Course course = courseDao.findById(id);
         if (course == null) {
@@ -269,6 +323,9 @@ public class GradeService {
         courseDao.delete(id);
     }
 
+    /**
+     * 课程表单的服务端校验：编号格式/唯一性、名称、学分、任课教师、学期。
+     */
     private void validateCourse(Course course) throws ValidationException {
         if (WebUtil.isBlank(course.getCourseCode())) {
             throw new ValidationException("课程编号不能为空");
@@ -293,10 +350,18 @@ public class GradeService {
         }
     }
 
+    /**
+     * 导出成绩明细（交给 ExportServlet 写成 CSV）。
+     */
     public List<ScoreRecord> exportRecords(Integer classId, Integer courseId) {
         return scoreDao.findAllForExport(classId, courseId);
     }
 
+    /**
+     * 把数据库返回的 6 个计数转换成 JSP 好渲染的“分数段”对象。
+     * counts[0] 是总数，counts[1..5] 分别是不及格、60–69、70–79、80–89、90–100。
+     * percentage 用于页面上的横向进度条宽度。
+     */
     private List<DistributionBucket> buildDistribution(int[] counts) {
         int total = counts[0];
         String[] labels = {"不及格", "60–69", "70–79", "80–89", "90–100"};
@@ -310,6 +375,9 @@ public class GradeService {
         return buckets;
     }
 
+    /**
+     * 按平均分从高到低给列表编号（DAO 已经按平均分降序查出来了，这里只负责写名次）。
+     */
     private void applyRanks(List<StudentSummary> students) {
         for (int i = 0; i < students.size(); i++) {
             students.get(i).setRank(i + 1);

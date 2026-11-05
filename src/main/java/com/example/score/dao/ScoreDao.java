@@ -17,8 +17,23 @@ import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 成绩相关的数据访问层（DAO），只负责写 SQL 和把 ResultSet 转成对象。
+ *
+ * <p>关键查询：</p>
+ * <ul>
+ *   <li>{@link #findRoster}：某班某门课的花名册（学生 LEFT JOIN 成绩，没录入也能显示学生）</li>
+ *   <li>{@link #findStudentScores}：学生个人成绩单，带班级平均分和班级排名</li>
+ *   <li>{@link #findClassStats} / {@link #findCourseStats}：平均分、及格率、优秀率</li>
+ *   <li>{@link #upsert}：有成绩就更新、没有就新增</li>
+ * </ul>
+ */
 public class ScoreDao {
 
+    /**
+     * 查询某班某门课的花名册。
+     * 用 LEFT JOIN：即使学生还没录这门课的成绩，也会出现在列表里（成绩为 null）。
+     */
     public List<RosterRow> findRoster(int classId, int courseId) {
         String sql = "SELECT s.id AS student_id, s.student_no, s.name, s.gender, sc.id AS score_id, "
                 + "sc.score, sc.updated_at "
